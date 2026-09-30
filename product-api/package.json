@@ -1,0 +1,23 @@
+{
+  "name": "ecommerce-product-api",
+  "version": "1.0.0",
+  "description": "REST-based E-Commerce Product API for web and mobile apps",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test"
+  },
+  "keywords": [
+    "ecommerce",
+    "product",
+    "api",
+    "docker",
+    "rest"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}

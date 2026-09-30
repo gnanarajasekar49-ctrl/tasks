@@ -1,0 +1,134 @@
+pipeline {
+    agent any
+
+    /*
+     * IMAGE_TAG uses the Jenkins BUILD_NUMBER to produce a unique,
+     * distinguishable image version for every build.
+     * Example: customer-portal:build-25
+     */
+    environment {
+        IMAGE_NAME    = 'customer-portal'
+        IMAGE_TAG     = "build-${env.BUILD_NUMBER}"
+        FULL_IMAGE    = "${IMAGE_NAME}:${IMAGE_TAG}"
+        CONTAINER_NAME = "customer-portal-verify-${env.BUILD_NUMBER}"
+        APP_PORT      = '8081'
+        VERIFY_PORT   = '9090'   // host port used during Container Verification
+    }
+
+    stages {
+
+        // ── Stage 1: Checkout ────────────────────────────────────────────────
+        stage('Checkout') {
+            steps {
+                echo "==> Checking out source code (Build #${env.BUILD_NUMBER})"
+                /*
+                 * Git credentials are stored in Jenkins Credential Manager.
+                 * The credential ID 'github-credentials' is configured in
+                 * Jenkins → Manage Jenkins → Credentials.
+                 * The actual username / token is NEVER stored in this file.
+                 */
+                checkout([$class: 'GitSCM',
+                    branches: [[name: '*/main']],
+                    userRemoteConfigs: [[
+                        url: 'https://github.com/gnanarajasekar49-ctrl/tasks.git',
+                        credentialsId: 'github-credentials'
+                    ]]
+                ])
+                echo "==> Checkout complete"
+            }
+        }
+
+        // ── Stage 2: Build ───────────────────────────────────────────────────
+        stage('Build') {
+            steps {
+                echo "==> Installing Node.js dependencies"
+                dir('customer-portal') {
+                    bat 'npm install'
+                }
+                echo "==> Build complete — node_modules installed successfully"
+            }
+        }
+
+        // ── Stage 3: Test ────────────────────────────────────────────────────
+        stage('Test') {
+            steps {
+                echo "==> Running automated test suite"
+                dir('customer-portal') {
+                    bat 'npm test'
+                }
+                echo "==> All tests passed"
+            }
+            /*
+             * If npm test exits with non-zero (any test failure),
+             * Jenkins marks this stage FAILED and the pipeline stops.
+             * Docker Build will NOT run.
+             */
+        }
+
+        // ── Stage 4: Docker Build ────────────────────────────────────────────
+        stage('Docker Build') {
+            steps {
+                echo "==> Building Docker image: ${env.FULL_IMAGE}"
+                dir('customer-portal') {
+                    bat "docker build -t ${env.FULL_IMAGE} ."
+                }
+                echo "==> Docker image built: ${env.FULL_IMAGE}"
+            }
+        }
+
+        // ── Stage 5: Container Verification ──────────────────────────────────
+        stage('Container Verification') {
+            steps {
+                echo "==> Starting temporary container for verification"
+                bat """
+                    docker run -d ^
+                      --name ${env.CONTAINER_NAME} ^
+                      -p ${env.VERIFY_PORT}:${env.APP_PORT} ^
+                      -e APP_ENV=ci-verify ^
+                      ${env.FULL_IMAGE}
+                """
+
+                echo "==> Waiting 15 seconds for container to initialise..."
+                sleep(time: 15, unit: 'SECONDS')
+
+                echo "==> Verifying application via /health endpoint"
+                bat """
+                    curl -f --retry 5 --retry-delay 3 --retry-connrefused ^
+                         http://localhost:${env.VERIFY_PORT}/health
+                """
+
+                echo "==> Verifying /api/customers endpoint responds"
+                bat """
+                    curl -f http://localhost:${env.VERIFY_PORT}/api/customers
+                """
+
+                echo "==> Container verification PASSED"
+            }
+        }
+
+    }
+
+    // ── Post: Cleanup ─────────────────────────────────────────────────────────
+    post {
+        always {
+            echo "==> Cleanup: stopping and removing temporary verification container"
+            bat """
+                docker stop ${env.CONTAINER_NAME} || echo "Container already stopped"
+                docker rm   ${env.CONTAINER_NAME} || echo "Container already removed"
+            """
+            echo "==> Cleanup complete"
+        }
+        success {
+            echo """
+╔══════════════════════════════════════════════════════╗
+║  BUILD SUCCESS                                       ║
+║  Image : ${env.FULL_IMAGE}
+║  Build : #${env.BUILD_NUMBER}
+╚══════════════════════════════════════════════════════╝
+            """
+        }
+        failure {
+            echo "==> Pipeline FAILED. Refer to the stage logs above for details."
+        }
+    }
+}

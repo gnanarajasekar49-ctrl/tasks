@@ -1,0 +1,13 @@
+{
+  "name": "banking-customer-portal",
+  "version": "1.0.0",
+  "description": "Banking Customer Portal - Customer Registration and Details API",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node test/customer.test.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
